@@ -269,6 +269,46 @@ find out -name "*.target.mk" -exec sed -i "" 's/-gdwarf-2/-gstabs+/g' {} \;
 
 The stabs debug format is fully compatible with Darwin's assembler.
 
+### 12. V8 immediate-crash.h Trap Instruction Fix (Critical)
+V8's crash handler uses `.4byte` for PPC64 trap instructions which Darwin's assembler rejects.
+Also, `V8_TARGET_OS_MACOS` is defined without a value, breaking preprocessor `||` expressions.
+
+**Error symptom**:
+```
+/var/tmp//ccXXXXXX.s:NNNN:Unknown pseudo-op: .4byte
+  OR
+error: operator '||' has no right operand
+```
+
+**Patch `deps/v8/src/base/immediate-crash.h`**:
+
+1. Find all occurrences of:
+   ```cpp
+   #elif V8_OS_DARWIN || V8_TARGET_OS_MACOS
+   ```
+   Replace with:
+   ```cpp
+   #elif defined(V8_OS_DARWIN) || defined(V8_TARGET_OS_MACOS)
+   ```
+
+2. In the `#elif V8_HOST_ARCH_PPC64` block, add Darwin case before the `#else`:
+   ```cpp
+   #if V8_OS_AIX
+   #define TRAP_SEQUENCE1_() asm volatile(".vbyte 4,0x7D821008");
+   #elif defined(V8_OS_DARWIN) || defined(V8_TARGET_OS_MACOS)
+   #define TRAP_SEQUENCE1_() asm volatile(".long 0x7D821008");
+   #else
+   #define TRAP_SEQUENCE1_() asm volatile(".4byte 0x7D821008");
+   #endif
+   ```
+
+**Quick sed fix**:
+```bash
+sed -i "" 's/V8_OS_DARWIN || V8_TARGET_OS_MACOS/defined(V8_OS_DARWIN) || defined(V8_TARGET_OS_MACOS)/g' deps/v8/src/base/immediate-crash.h
+```
+
+Darwin uses `.long` instead of `.4byte` for 32-bit data directives.
+
 ## Configure Command
 ```bash
 ./configure \
