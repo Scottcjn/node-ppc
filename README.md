@@ -150,20 +150,18 @@ cmd_...node_js2c = ... python3 ./js2c.py "$(obj)/gen/node_javascript.cc" ...
 # Also remove $(builddir)/node_js2c dependency from line 27
 ```
 
-### 9. ada Library __int128 Charconv Fix
-GCC 10's `<charconv>` header has a template bug with `__int128` on PPC64 Big Endian.
+### 9. Global __int128 Charconv Fix
+GCC 10's `<charconv>` header has a template bug with `__int128` on PPC64 Big Endian. This affects multiple files (ada, cares_wrap, etc.).
 
 **Error symptom**:
 ```
 error: '__size' is not a member of 'std::__make_unsigned_selector_base::_List<>'
 ```
 
-**Fix**: Add `-U__SIZEOF_INT128__` to CFLAGS in `out/deps/ada/ada.target.mk`:
-```makefile
-CFLAGS_Release := \
-    -U__SIZEOF_INT128__ \
-    -O3 \
-    ...
+**Fix**: Add `-U__SIZEOF_INT128__` to CFLAGS_Release in **ALL** `*.target.mk` files:
+```bash
+# Apply to all target.mk files
+find out -name "*.target.mk" -exec sed -i 's/CFLAGS_Release := \\/CFLAGS_Release := \\\n\t-U__SIZEOF_INT128__ \\/' {} \;
 ```
 
 ## Configure Command
@@ -195,8 +193,8 @@ find . -name '*.target.mk' -exec sed -i 's/-arch i386/-m64/g' {} \;
 # Add C++20 to all targets
 find . -name '*.target.mk' -exec sed -i 's/CFLAGS_CC_Release :=/CFLAGS_CC_Release := -std=gnu++20/g' {} \;
 
-# Fix ada __int128 issue
-sed -i 's/CFLAGS_Release := \\/CFLAGS_Release := \\\n\t-U__SIZEOF_INT128__ \\/' deps/ada/ada.target.mk
+# Fix global __int128 issue (affects ada, cares_wrap, etc.)
+find . -name "*.target.mk" -exec sed -i 's/CFLAGS_Release := \\/CFLAGS_Release := \\\n\t-U__SIZEOF_INT128__ \\/' {} \;
 
 # Replace node_js2c with Python workaround (run from source root)
 python3 -c "
