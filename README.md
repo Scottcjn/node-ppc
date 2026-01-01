@@ -151,19 +151,108 @@ cmd_...node_js2c = ... python3 ./js2c.py "$(obj)/gen/node_javascript.cc" ...
 ```
 
 ### 9. Global __int128 Charconv Fix
-GCC 10's `<charconv>` header has a template bug with `__int128` on PPC64 Big Endian. This affects multiple files (ada, cares_wrap, etc.).
+GCC 10's `<charconv>` header has a template bug with `__int128` on PPC64 Big Endian. This affects multiple files.
 
 **Error symptom**:
 ```
 error: '__size' is not a member of 'std::__make_unsigned_selector_base::_List<>'
 ```
 
-**Fix**: Add `-D__SIZEOF_INT128__=0` to CFLAGS_Release in **ALL** `*.target.mk` files.
+**Fix Part A**: Add `-D__SIZEOF_INT128__=0` to CFLAGS_Release in **ALL** `*.target.mk` files.
 Note: `-U` doesn't work for builtin compiler macros; must redefine to 0.
 ```bash
 # Apply to all target.mk files
 find out -name "*.target.mk" -exec sed -i 's/CFLAGS_Release := \\/CFLAGS_Release := \\\n\t-D__SIZEOF_INT128__=0 \\/' {} \;
 ```
+
+### 10. Ada Library Charconv Source Patch (Critical)
+The `-D__SIZEOF_INT128__=0` flag helps but isn't enough for ada.cpp which directly includes `<charconv>`.
+The ada URL parser needs custom `to_chars` and `from_chars` implementations for PPC64 BE.
+
+**Patch `deps/ada/ada.h`** - Add at the VERY TOP of the file (before any includes):
+```cpp
+// PPC64 Big Endian workaround: GCC 10 charconv has broken __int128 template
+// Must be at the very top before any other includes
+#if defined(__powerpc64__) && defined(__BIG_ENDIAN__)
+#include <cstdio>
+#include <cstdlib>
+#include <cerrno>
+namespace std {
+    struct to_chars_result {
+        char* ptr;
+        std::errc ec;
+    };
+    struct from_chars_result {
+        const char* ptr;
+        std::errc ec;
+    };
+    // to_chars - number to string
+    template<typename T>
+    inline to_chars_result to_chars(char* first, char* last, T value, int base = 10) {
+        char fmt[8] = "%";
+        if (base == 16) strcat(fmt, "llx");
+        else strcat(fmt, "lld");
+        int len = snprintf(first, last - first, fmt, (long long)value);
+        if (len < 0 || len >= last - first) {
+            return {last, std::errc::value_too_large};
+        }
+        return {first + len, {}};
+    }
+    // from_chars - string to number (overloads for different types)
+    inline from_chars_result from_chars(const char* first, const char* last, int& value, int base = 10) {
+        char* end;
+        errno = 0;
+        long v = strtol(first, &end, base);
+        if (errno == ERANGE) return {first, std::errc::result_out_of_range};
+        if (end == first) return {first, std::errc::invalid_argument};
+        value = (int)v;
+        return {end, {}};
+    }
+    inline from_chars_result from_chars(const char* first, const char* last, uint16_t& value, int base = 10) {
+        char* end;
+        errno = 0;
+        unsigned long v = strtoul(first, &end, base);
+        if (errno == ERANGE || v > 65535) return {first, std::errc::result_out_of_range};
+        if (end == first) return {first, std::errc::invalid_argument};
+        value = (uint16_t)v;
+        return {end, {}};
+    }
+    inline from_chars_result from_chars(const char* first, const char* last, uint32_t& value, int base = 10) {
+        char* end;
+        errno = 0;
+        unsigned long v = strtoul(first, &end, base);
+        if (errno == ERANGE) return {first, std::errc::result_out_of_range};
+        if (end == first) return {first, std::errc::invalid_argument};
+        value = (uint32_t)v;
+        return {end, {}};
+    }
+    inline from_chars_result from_chars(const char* first, const char* last, uint64_t& value, int base = 10) {
+        char* end;
+        errno = 0;
+        unsigned long long v = strtoull(first, &end, base);
+        if (errno == ERANGE) return {first, std::errc::result_out_of_range};
+        if (end == first) return {first, std::errc::invalid_argument};
+        value = (uint64_t)v;
+        return {end, {}};
+    }
+}
+#define ADA_PPC64_CHARCONV_DEFINED 1
+#else
+// Normal platforms use standard charconv
+#endif
+```
+
+**Patch `deps/ada/ada.cpp`** - Find and comment out the charconv include:
+```cpp
+// Original:
+#include <charconv>
+// Change to:
+#ifndef ADA_PPC64_CHARCONV_DEFINED
+#include <charconv>
+#endif
+```
+
+This provides a complete fallback using snprintf/strtol for PPC64 Big Endian systems.
 
 ## Configure Command
 ```bash
@@ -215,9 +304,17 @@ echo "Fixes applied!"
 - V8 may have additional PPC64 Big Endian compatibility issues
 - Some tests may fail due to platform-specific assumptions
 - Inspector/debugging features are disabled
+- The `__SIZEOF_INT128__` redefinition produces harmless warnings
 
 ## Status
-Build in progress - OpenSSL and dependencies completed, continuing with V8 and Node core.
+**Build Progress**: 1400+ objects compiled (January 2025)
+- ✅ OpenSSL - Complete
+- ✅ ada URL parser - Complete (with charconv patch)
+- ✅ brotli compression - Complete
+- ✅ sqlite - Complete
+- ✅ ngtcp2 (QUIC) - In progress
+- 🔄 V8 JavaScript engine - Building
+- ⏳ Node core - Pending
 
 ## Files in This Repository
 - `stdc++_compat.cpp` - C++ runtime shims for 64-bit PPC
