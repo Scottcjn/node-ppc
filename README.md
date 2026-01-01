@@ -158,10 +158,11 @@ GCC 10's `<charconv>` header has a template bug with `__int128` on PPC64 Big End
 error: '__size' is not a member of 'std::__make_unsigned_selector_base::_List<>'
 ```
 
-**Fix**: Add `-U__SIZEOF_INT128__` to CFLAGS_Release in **ALL** `*.target.mk` files:
+**Fix**: Add `-D__SIZEOF_INT128__=0` to CFLAGS_Release in **ALL** `*.target.mk` files.
+Note: `-U` doesn't work for builtin compiler macros; must redefine to 0.
 ```bash
 # Apply to all target.mk files
-find out -name "*.target.mk" -exec sed -i 's/CFLAGS_Release := \\/CFLAGS_Release := \\\n\t-U__SIZEOF_INT128__ \\/' {} \;
+find out -name "*.target.mk" -exec sed -i 's/CFLAGS_Release := \\/CFLAGS_Release := \\\n\t-D__SIZEOF_INT128__=0 \\/' {} \;
 ```
 
 ## Configure Command
@@ -194,7 +195,8 @@ find . -name '*.target.mk' -exec sed -i 's/-arch i386/-m64/g' {} \;
 find . -name '*.target.mk' -exec sed -i 's/CFLAGS_CC_Release :=/CFLAGS_CC_Release := -std=gnu++20/g' {} \;
 
 # Fix global __int128 issue (affects ada, cares_wrap, etc.)
-find . -name "*.target.mk" -exec sed -i 's/CFLAGS_Release := \\/CFLAGS_Release := \\\n\t-U__SIZEOF_INT128__ \\/' {} \;
+# Note: Must use -D...=0, not -U (doesn't work for builtin macros)
+find . -name "*.target.mk" -exec sed -i 's/CFLAGS_Release := \\/CFLAGS_Release := \\\n\t-D__SIZEOF_INT128__=0 \\/' {} \;
 
 # Replace node_js2c with Python workaround (run from source root)
 python3 -c "
