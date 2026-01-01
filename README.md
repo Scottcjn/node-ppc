@@ -254,6 +254,21 @@ namespace std {
 
 This provides a complete fallback using snprintf/strtol for PPC64 Big Endian systems.
 
+### 11. Debug Format Fix (Darwin Assembler)
+GCC 10 with `-gdwarf-2` generates `.4byte` pseudo-ops that Darwin's assembler doesn't understand.
+
+**Error symptom**:
+```
+/var/tmp//ccXXXXXX.s:3650:Unknown pseudo-op: .4byte
+```
+
+**Fix**: Replace `-gdwarf-2` with `-gstabs+` in all makefiles:
+```bash
+find out -name "*.target.mk" -exec sed -i "" 's/-gdwarf-2/-gstabs+/g' {} \;
+```
+
+The stabs debug format is fully compatible with Darwin's assembler.
+
 ## Configure Command
 ```bash
 ./configure \
@@ -286,6 +301,9 @@ find . -name '*.target.mk' -exec sed -i 's/CFLAGS_CC_Release :=/CFLAGS_CC_Releas
 # Fix global __int128 issue (affects ada, cares_wrap, etc.)
 # Note: Must use -D...=0, not -U (doesn't work for builtin macros)
 find . -name "*.target.mk" -exec sed -i 's/CFLAGS_Release := \\/CFLAGS_Release := \\\n\t-D__SIZEOF_INT128__=0 \\/' {} \;
+
+# Fix debug format - Darwin assembler doesn't understand .4byte
+find . -name "*.target.mk" -exec sed -i 's/-gdwarf-2/-gstabs+/g' {} \;
 
 # Replace node_js2c with Python workaround (run from source root)
 python3 -c "
